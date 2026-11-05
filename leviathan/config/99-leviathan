@@ -1,0 +1,28 @@
+# ---------------------------------------------------------------
+# LEVIATHAN — package selection (appended to FriendlyWrt .config)
+# P01yg107 Labs · NanoPi R28S (RK3528A)
+# ---------------------------------------------------------------
+# Version string shown in LuCI / os-release
+CONFIG_VERSION_DIST="Leviathan"
+CONFIG_VERSION_MANUFACTURER="P01yg107 Labs"
+CONFIG_VERSION_MANUFACTURER_URL="https://p01ylabs.com"
+
+# AR9271 (ath9k_htc) firmware.
+# The driver itself (ath9k_htc.ko) comes from FriendlyELEC's kernel
+# (CONFIG_ATH9K_HTC=m in nanopi5_linux_defconfig), not OpenWrt kmods.
+CONFIG_PACKAGE_ath9k-htc-firmware=y
+
+# Wireless tooling
+CONFIG_PACKAGE_iw-full=y
+CONFIG_PACKAGE_aircrack-ng=y
+CONFIG_PACKAGE_hcxdumptool=y
+CONFIG_PACKAGE_hcxtools=y
+CONFIG_PACKAGE_reaver=y
+
+# Network tooling
+CONFIG_PACKAGE_tcpdump=y
+CONFIG_PACKAGE_nmap=y
+
+# Hardware inspection (lsusb / lspci)
+CONFIG_PACKAGE_usbutils=y
+CONFIG_PACKAGE_pciutils=y

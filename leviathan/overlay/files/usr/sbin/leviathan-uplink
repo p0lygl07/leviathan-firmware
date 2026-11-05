@@ -1,0 +1,92 @@
+#!/bin/sh
+# leviathan-uplink — join an upstream Wi-Fi network as a client while
+# the LEVIATHAN access point keeps running on the same radio.
+#
+#   leviathan-uplink <ssid> <key> [psk2|sae|sae-mixed]
+#   leviathan-uplink status
+#   leviathan-uplink off
+#
+# The onboard radio (radio0) must support concurrent AP+STA. On a
+# single radio the client and AP share one channel: when the uplink
+# associates, the AP follows it to the upstream channel.
+
+RADIO="radio0"
+
+usage() {
+	echo "usage: leviathan-uplink <ssid> <key> [psk2|sae|sae-mixed]"
+	echo "       leviathan-uplink status"
+	echo "       leviathan-uplink off"
+	exit 1
+}
+
+cmd_status() {
+	echo "== interfaces =="
+	iw dev 2>/dev/null | awk '/Interface/{i=$2} /type/{print i" ("$2")"} /ssid/{print "  ssid "$2} /channel/{print "  "$0}'
+	echo
+	echo "== wwan L3 =="
+	ip -br addr show 2>/dev/null | grep -v '^lo' || true
+	echo
+	echo "== default route =="
+	ip route 2>/dev/null | grep '^default' || echo "  (none)"
+}
+
+cmd_off() {
+	uci -q delete network.wwan
+	uci -q delete wireless.wwan
+	uci -q commit network
+	uci -q commit wireless
+	/etc/init.d/network reload
+	wifi reload
+	echo "[leviathan] uplink removed."
+}
+
+cmd_up() {
+	SSID="$1"; KEY="$2"; ENC="${3:-psk2}"
+
+	# network interface (DHCP client)
+	uci -q batch <<-EOF
+		set network.wwan=interface
+		set network.wwan.proto='dhcp'
+	EOF
+
+	# client radio on the same device as the AP
+	uci -q batch <<-EOF
+		set wireless.wwan=wifi-iface
+		set wireless.wwan.device='${RADIO}'
+		set wireless.wwan.mode='sta'
+		set wireless.wwan.network='wwan'
+		set wireless.wwan.ssid='${SSID}'
+		set wireless.wwan.encryption='${ENC}'
+		set wireless.wwan.key='${KEY}'
+	EOF
+
+	# put wwan in the wan firewall zone (NAT + no inbound)
+	WANZ=$(uci show firewall 2>/dev/null | sed -n "s/^firewall\.\([^.]*\)\.name='wan'$/\1/p" | head -n1)
+	if [ -n "$WANZ" ]; then
+		if ! uci -q get firewall."$WANZ".network | grep -qw wwan; then
+			uci add_list firewall."$WANZ".network='wwan'
+		fi
+	fi
+
+	uci commit network
+	uci commit wireless
+	uci commit firewall
+
+	/etc/init.d/network reload
+	wifi reload
+	/etc/init.d/firewall reload
+
+	echo "[leviathan] uplink '${SSID}' (${ENC}) configured."
+	echo "[leviathan] the AP + your SSH session may drop for 10-30s while it associates."
+	echo "[leviathan] run 'leviathan-uplink status' after it settles."
+}
+
+case "$1" in
+	status) cmd_status ;;
+	off)    cmd_off ;;
+	"" )    usage ;;
+	* )
+		[ -n "$2" ] || usage
+		cmd_up "$1" "$2" "$3"
+		;;
+esac

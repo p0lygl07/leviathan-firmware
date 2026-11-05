@@ -1,0 +1,278 @@
+name: Build Leviathan
+
+# Manual trigger: Actions tab -> "Build Leviathan" -> Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Leviathan version tag (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+
+env:
+  FRIENDLYWRT_VERSION: '25.12'
+  CPU: 'rk3528'          # NanoPi R28S
+  MODEL: 'R28S-Zero2-NEO3Plus-Series'
+
+jobs:
+  prepare_release:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Create release
+        id: release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: leviathan-${{ github.event.inputs.version }}
+          name: Leviathan ${{ github.event.inputs.version }}
+          draft: false
+          prerelease: false
+    outputs:
+      release_tag: leviathan-${{ github.event.inputs.version }}
+
+  build_friendlywrt:
+    needs: prepare_release
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialization environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d
+          wget https://raw.githubusercontent.com/friendlyarm/build-env-on-ubuntu-bionic/master/install.sh
+          sed -i -e 's/^apt-get -y install openjdk-8-jdk/# apt-get -y install openjdk-8-jdk/g' install.sh
+          sed -i -e 's/^\[ -d fa-toolchain \]/# [ -d fa-toolchain ]/g' install.sh
+          sed -i -e 's/^(cat fa-toolchain/# (cat fa-toolchain/g' install.sh
+          sed -i -e 's/^(tar xf fa-toolchain/# (tar xf fa-toolchain/g' install.sh
+          sudo -E bash ./install.sh
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'noreply@github.com'
+          git config --global color.ui false
+          git clone https://github.com/friendlyarm/repo
+          sudo -E cp repo/repo /usr/bin/
+          mkdir -p ./artifact
+          sudo swapoff -a || true
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk /usr/local/share/boost /opt/ghc 2>/dev/null || true
+          echo "cores: $(nproc)"
+
+      - name: Download source
+        run: |
+          mkdir project && cd project
+          repo init --depth=1 -u https://github.com/friendlyarm/friendlywrt_manifests \
+            -b master-v${FRIENDLYWRT_VERSION} -m rk3399.xml \
+            --repo-url=https://github.com/friendlyarm/repo --no-clone-bundle
+          repo sync -c friendlywrt --no-clone-bundle
+          repo sync -c configs --no-clone-bundle
+          repo sync -c device/common --no-clone-bundle
+          repo sync -c device/friendlyelec --no-clone-bundle
+          repo sync -c scripts --no-clone-bundle
+          repo sync -c scripts/sd-fuse --no-clone-bundle
+          repo sync -c toolchain --no-clone-bundle
+
+      - name: Apply Leviathan package selection
+        run: |
+          cp -r leviathan project/leviathan
+          cd project
+          source ../scripts/custome_config.sh
+
+      - name: Prepare dot config and feeds
+        run: |
+          cd project
+          DIST_DIR=friendlywrt$(echo ${FRIENDLYWRT_VERSION}|awk -F . '{print $1}')
+          cat > .current_config.mk <<EOL
+          . device/friendlyelec/rk3399/base.mk
+          TARGET_IMAGE_DIRNAME=${DIST_DIR}
+          TARGET_FRIENDLYWRT_CONFIG=rockchip
+          EOL
+          DEBUG_DOT_CONFIG=1 ./build.sh friendlywrt
+
+      - name: Download package
+        run: |
+          cd project/friendlywrt
+          make download -j8
+          find dl -size -1024c -exec rm -f {} \;
+
+      - name: Compile friendlyWrt
+        id: compile
+        continue-on-error: true
+        run: |
+          cd project/friendlywrt
+          make -j$(nproc) || echo "retry-needed=1" >> $GITHUB_ENV
+
+      - name: Retry (verbose)
+        if: env.retry-needed == '1'
+        run: cd project/friendlywrt && make -j1 V=s
+
+      - name: Create rootfs package
+        id: rootfs
+        run: |
+          cd project
+          source .current_config.mk
+          tar czf ../artifact/rootfs-friendlywrt-${FRIENDLYWRT_VERSION}.tgz \
+            ${FRIENDLYWRT_SRC}/${FRIENDLYWRT_ROOTFS} \
+            ${FRIENDLYWRT_SRC}/${FRIENDLYWRT_PACKAGE_DIR}
+
+      - name: Host package-manager bundle
+        run: |
+          cd project
+          source .current_config.mk
+          PM_BIN=
+          [ -f ${FRIENDLYWRT_SRC}/staging_dir/host/bin/apk ]  && PM_BIN=${FRIENDLYWRT_SRC}/staging_dir/host/bin/apk
+          [ -f ${FRIENDLYWRT_SRC}/staging_dir/host/bin/opkg ] && PM_BIN=${FRIENDLYWRT_SRC}/staging_dir/host/bin/opkg
+          tar czf ../artifact/host-pm-${FRIENDLYWRT_VERSION}.tgz "$PM_BIN"
+
+      - name: Upload rootfs
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./artifact/rootfs-friendlywrt-${{ env.FRIENDLYWRT_VERSION }}.tgz
+          asset_name: rootfs-friendlywrt-${{ env.FRIENDLYWRT_VERSION }}.tgz
+          tag: ${{ needs.prepare_release.outputs.release_tag }}
+          overwrite: true
+
+      - name: Upload host-pm
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./artifact/host-pm-${{ env.FRIENDLYWRT_VERSION }}.tgz
+          asset_name: host-pm-${{ env.FRIENDLYWRT_VERSION }}.tgz
+          tag: ${{ needs.prepare_release.outputs.release_tag }}
+          overwrite: true
+
+  build_img:
+    needs: [prepare_release, build_friendlywrt]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialization environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d
+          wget https://raw.githubusercontent.com/friendlyarm/build-env-on-ubuntu-bionic/master/install.sh
+          sed -i -e 's/^apt-get -y install openjdk-8-jdk/# apt-get -y install openjdk-8-jdk/g' install.sh
+          sed -i -e 's/^\[ -d fa-toolchain \]/# [ -d fa-toolchain ]/g' install.sh
+          sed -i -e 's/^(cat fa-toolchain/# (cat fa-toolchain/g' install.sh
+          sed -i -e 's/^(tar xf fa-toolchain/# (tar xf fa-toolchain/g' install.sh
+          sudo -E bash ./install.sh
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'noreply@github.com'
+          git clone https://github.com/friendlyarm/repo
+          sudo -E cp repo/repo /usr/bin/
+          mkdir -p ./artifact
+          sudo swapoff -a || true
+
+      - name: Download source
+        run: |
+          mkdir project && cd project
+          repo init --depth=1 -u https://github.com/friendlyarm/friendlywrt_manifests \
+            -b master-v${FRIENDLYWRT_VERSION} -m ${CPU}.xml \
+            --repo-url=https://github.com/friendlyarm/repo --no-clone-bundle
+          repo sync -c kernel --no-clone-bundle
+          repo sync -c u-boot --no-clone-bundle
+          repo sync -c rkbin --no-clone-bundle
+          repo sync -c configs --no-clone-bundle
+          repo sync -c device/common --no-clone-bundle
+          repo sync -c device/friendlyelec --no-clone-bundle
+          repo sync -c scripts --no-clone-bundle
+          repo sync -c scripts/sd-fuse --no-clone-bundle
+          repo sync -c toolchain --no-clone-bundle
+
+      - name: Download rootfs
+        uses: robinraju/release-downloader@v1.6
+        with:
+          repository: ${{ github.repository }}
+          tag: ${{ needs.prepare_release.outputs.release_tag }}
+          fileName: "rootfs-friendlywrt-${{ env.FRIENDLYWRT_VERSION }}.tgz"
+
+      - name: Download host-pm
+        uses: robinraju/release-downloader@v1.6
+        with:
+          repository: ${{ github.repository }}
+          tag: ${{ needs.prepare_release.outputs.release_tag }}
+          fileName: "host-pm-${{ env.FRIENDLYWRT_VERSION }}.tgz"
+
+      - name: Prepare config + Leviathan overlay
+        run: |
+          cp -r leviathan project/leviathan
+          cd project
+          DIST_DIR=friendlywrt$(echo ${FRIENDLYWRT_VERSION}|awk -F . '{print $1}')
+          IMG_FILE=${MODEL}-FriendlyWrt-${FRIENDLYWRT_VERSION}.img
+          cat > .current_config.mk <<EOL
+          . device/friendlyelec/${CPU}/base.mk
+          TARGET_IMAGE_DIRNAME=${DIST_DIR}
+          TARGET_FRIENDLYWRT_CONFIG=rockchip
+          TARGET_SD_RAW_FILENAME=${IMG_FILE}
+          FRIENDLYWRT_FILES+=(leviathan/overlay)
+          EOL
+          echo "IMG_FILE=${IMG_FILE}" >> $GITHUB_ENV
+          echo "DIST_DIR=${DIST_DIR}" >> $GITHUB_ENV
+
+      - name: Unpack rootfs + host-pm
+        run: |
+          cd project
+          tar xzf ../rootfs-friendlywrt-${FRIENDLYWRT_VERSION}.tgz
+          tar xzf ../host-pm-${FRIENDLYWRT_VERSION}.tgz
+
+      - name: Compile uboot and kernel
+        run: |
+          cd project
+          source ../scripts/custome_kernel_config.sh
+          ./build.sh uboot
+          ./build.sh kernel
+
+      - name: Build sd image
+        env:
+          LEVIATHAN_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          cd project
+          ./build.sh sd-img
+          mv out/${IMG_FILE} ../artifact/
+          cd ../artifact/
+          LEV="Leviathan-${{ github.event.inputs.version }}-R28S.img"
+          mv ${IMG_FILE} ${LEV}
+          gzip ${LEV}
+          echo "LEV_ASSET=${LEV}.gz" >> $GITHUB_ENV
+
+      - name: Checksum
+        run: cd artifact && sha256sum ${LEV_ASSET} > ${LEV_ASSET}.sha256
+
+      - name: Upload Leviathan image
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./artifact/${{ env.LEV_ASSET }}
+          asset_name: ${{ env.LEV_ASSET }}
+          tag: ${{ needs.prepare_release.outputs.release_tag }}
+          overwrite: true
+
+      - name: Upload checksum
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./artifact/${{ env.LEV_ASSET }}.sha256
+          asset_name: ${{ env.LEV_ASSET }}.sha256
+          tag: ${{ needs.prepare_release.outputs.release_tag }}
+          overwrite: true
+
+  cleanup:
+    needs: [prepare_release, build_img]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Delete intermediate assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare_release.outputs.release_tag }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[] | select(.name | startswith("rootfs-friendlywrt-") or startswith("host-pm-")) | .name' \
+          | while read -r asset; do
+              [ -z "$asset" ] && continue
+              gh release delete-asset "$RELEASE_TAG" "$asset" --yes --repo "$GITHUB_REPOSITORY"
+            done

@@ -1,0 +1,75 @@
+#!/bin/sh
+# leviathan-mon — bring the AR9271 (ath9k_htc) up as a monitor interface
+# for authorized wireless auditing, without disturbing the onboard AP.
+#
+#   leviathan-mon up [channel]   create mon0 on the ath9k_htc phy
+#   leviathan-mon down           remove mon0
+#   leviathan-mon status         show phys / interfaces
+#
+# Authorized security testing and education only.
+
+MON="mon0"
+
+# Find the phy that belongs to the ath9k_htc (USB) radio, not the
+# onboard AIC8800. Match on the driver symlink under /sys.
+find_ath_phy() {
+	for p in /sys/class/ieee80211/phy*; do
+		[ -e "$p" ] || continue
+		drv=$(basename "$(readlink -f "$p/device/driver" 2>/dev/null)" 2>/dev/null)
+		case "$drv" in
+			*ath9k_htc*|*usb*)
+				# confirm it is really ath9k_htc via the module link
+				if readlink -f "$p/device/driver" 2>/dev/null | grep -q ath9k_htc; then
+					basename "$p"; return 0
+				fi
+				;;
+		esac
+	done
+	# fallback: the phy whose device path is USB
+	for p in /sys/class/ieee80211/phy*; do
+		case "$(readlink -f "$p/device" 2>/dev/null)" in
+			*usb*) basename "$p"; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+cmd_status() {
+	echo "== phys =="
+	for p in /sys/class/ieee80211/phy*; do
+		[ -e "$p" ] || continue
+		n=$(basename "$p")
+		d=$(readlink -f "$p/device/driver" 2>/dev/null | sed 's#.*/##')
+		echo "  $n  driver=${d:-?}"
+	done
+	echo
+	echo "== interfaces =="
+	iw dev 2>/dev/null | awk '/Interface/{i=$2} /type/{print "  "i" ("$2")"}'
+}
+
+cmd_up() {
+	CH="$1"
+	PHY=$(find_ath_phy) || { echo "[leviathan] no ath9k_htc phy found — is the AR9271 plugged in? (dmesg | grep ath9k_htc)"; exit 1; }
+	echo "[leviathan] ath9k_htc radio = $PHY"
+
+	iw dev "$MON" del 2>/dev/null
+	iw phy "$PHY" interface add "$MON" type monitor || { echo "[leviathan] failed to create $MON"; exit 1; }
+	ip link set "$MON" up
+
+	if [ -n "$CH" ]; then
+		iw dev "$MON" set channel "$CH" 2>/dev/null && echo "[leviathan] $MON on channel $CH"
+	fi
+	echo "[leviathan] $MON is up (monitor) on $PHY."
+	echo "[leviathan] tcpdump -i $MON   /   airodump-ng $MON"
+}
+
+cmd_down() {
+	iw dev "$MON" del 2>/dev/null && echo "[leviathan] $MON removed." || echo "[leviathan] $MON not present."
+}
+
+case "$1" in
+	up)     cmd_up "$2" ;;
+	down)   cmd_down ;;
+	status|"") cmd_status ;;
+	*) echo "usage: leviathan-mon up [channel] | down | status"; exit 1 ;;
+esac
