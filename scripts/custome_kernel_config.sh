@@ -23,19 +23,17 @@ done
 echo "[leviathan] kernel config patched: ${KCFG}"
 
 # ---------------------------------------------------------------------
-# Fix: this 6.1 kernel's bitfield.h predates FIELD_PREP_CONST, but the
-# bundled rtw88 driver uses it -> -Werror=implicit-function-declaration
-# breaks `build.sh kernel`. Define it if missing (constant-expression
-# safe; __bf_shf is already provided in the same header).
+# Disable the bundled Realtek rtw88 driver. lwfinger/rtw88 is an
+# inconsistent backport that will not compile against this 6.1 kernel,
+# and Leviathan uses no Realtek radio — it runs the onboard AIC8800
+# plus the AR9271 (ath9k_htc). The aic8800 build is a separate block
+# and is left intact. We excise only the rtw88 block, and also skip the
+# optional Realtek USB wifi drivers so none can break the kernel step.
 # ---------------------------------------------------------------------
-BF=kernel/include/linux/bitfield.h
-if [ -f "$BF" ] && ! grep -q "FIELD_PREP_CONST" "$BF"; then
-cat >> "$BF" <<'BFEOF'
-
-#ifndef FIELD_PREP_CONST
-#define FIELD_PREP_CONST(_mask, _val) \
-	(((typeof(_mask))(_val) << __bf_shf(_mask)) & (_mask))
-#endif
-BFEOF
-echo "[leviathan] patched FIELD_PREP_CONST into ${BF}"
+BK=scripts/sd-fuse/build-kernel.sh
+if [ -f "$BK" ] && grep -q "build rtw_8822ce wifi driver" "$BK"; then
+  perl -0pi -e 's/\n[ \t]*# build rtw_8822ce wifi driver.*?\n([ \t]*# build usb wifi driver)/\n$1/s' "$BK"
+  echo "[leviathan] excised rtw88 block from ${BK}"
 fi
+export BUILD_THIRD_PARTY_DRIVER=0
+echo "[leviathan] BUILD_THIRD_PARTY_DRIVER=0 (skip optional Realtek USB drivers)"
