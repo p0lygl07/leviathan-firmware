@@ -8,8 +8,9 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 rsync -a --no-o --no-g "${HERE}/files/" "${ROOTFS_DIR}/"
 
 chmod 0755 "${ROOTFS_DIR}/etc/uci-defaults/zz-leviathan"
-chmod 0755 "${ROOTFS_DIR}/usr/sbin/leviathan-uplink"
-chmod 0755 "${ROOTFS_DIR}/usr/sbin/leviathan-mon"
+for s in leviathan-uplink leviathan-mon leviathan-scan leviathan-handshake leviathan-pmkid leviathan-node; do
+	chmod 0755 "${ROOTFS_DIR}/usr/sbin/${s}"
+done
 
 echo "${LEVIATHAN_VERSION:-dev}" > "${ROOTFS_DIR}/etc/leviathan_version"
 sed -i "s/__LEV_VER__/${LEVIATHAN_VERSION:-dev}/" "${ROOTFS_DIR}/etc/banner"

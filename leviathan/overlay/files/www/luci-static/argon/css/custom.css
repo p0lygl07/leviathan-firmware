@@ -1,0 +1,66 @@
+/* ------------------------------------------------------------------
+   LEVIATHAN — P01yg107 Labs red-on-black LuCI skin
+   Loaded automatically by luci-theme-argon when present as custom.css.
+   Overrides argon's accent + surfaces; safe to tune live on-device.
+   ------------------------------------------------------------------ */
+:root,
+:root[data-darkmode="true"] {
+  --primary: #e10600;
+  --primary-light: #ff2a21;
+  --primary-dark: #a30400;
+
+  --bar-bg: #0b0c0e;
+  --bar-fg: #f2f2f3;
+  --menu-bg: #121317;
+  --menu-fg: #e6e6e8;
+
+  --background: #0a0b0d;
+  --header-color: #e10600;
+  --border-color: #26272c;
+}
+
+/* page + body surfaces */
+body,
+.main,
+#maincontent {
+  background: #0a0b0d !important;
+  color: #e6e6e8 !important;
+}
+
+/* top bar / brand */
+header, .navigation, #topmenu, .main > .loading, .fixed {
+  background: linear-gradient(90deg, #0b0c0e 0%, #1a0c0d 100%) !important;
+}
+.brand, .luci-link, header a { color: #e10600 !important; }
+
+/* panels / tables */
+.cbi-section, .table, .Flex, .panel, fieldset, .cbi-map {
+  background: #121317 !important;
+  border-color: #26272c !important;
+  color: #e6e6e8 !important;
+}
+th { background: #1a1b1f !important; color: #ff4b42 !important; }
+
+/* buttons */
+.btn, .cbi-button, button {
+  background: #e10600 !important;
+  border-color: #a30400 !important;
+  color: #fff !important;
+}
+.btn:hover, .cbi-button:hover, button:hover { background: #ff2a21 !important; }
+.cbi-button-neutral, .btn.cbi-button-neutral {
+  background: #26272c !important; color: #e6e6e8 !important; border-color:#3a3b42 !important;
+}
+
+/* links + accents */
+a { color: #ff4b42; }
+a:hover { color: #ff2a21; }
+
+/* login page branding */
+.login-page, .host-container {
+  background: radial-gradient(circle at 50% 30%, #1a0c0d 0%, #0a0b0d 70%) !important;
+}
+.login-page .btn { background:#e10600 !important; }
+
+/* status/health dots keep their colors; just soften the online green */
+.label-success { background:#1e7e34 !important; }

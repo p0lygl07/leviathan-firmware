@@ -1,0 +1,48 @@
+#!/bin/sh
+# leviathan-node — control a network-attached Ghost ESP sensor node
+# (e.g. a P01yg107 Oikake) from the Leviathan over the LAN.
+#
+#   leviathan-node set <ip>         remember the node's address
+#   leviathan-node status           reachable? + node info
+#   leviathan-node get <path>       raw GET against the node (e.g. /api/status)
+#
+# SCAFFOLDING: Ghost ESP's HTTP surface differs by build. Point PATHS at
+# your node's real endpoints once it's on the LAN. No node hardware is
+# required for this to install.
+
+CONF="/etc/leviathan/node.conf"
+mkdir -p /etc/leviathan
+# shellcheck source=/dev/null
+[ -f "$CONF" ] && . "$CONF"
+NODE_IP="${NODE_IP:-}"
+
+fetch() { # url -> stdout
+	if command -v curl >/dev/null; then curl -fsS --max-time 8 "$1"
+	else wget -q -O - --timeout=8 "$1"; fi
+}
+
+case "$1" in
+	set)
+		[ -n "$2" ] || { echo "usage: leviathan-node set <ip>"; exit 1; }
+		echo "NODE_IP=$2" > "$CONF"
+		echo "[leviathan] node address saved: $2"
+		;;
+	status)
+		[ -n "$NODE_IP" ] || { echo "[leviathan] no node set — run: leviathan-node set <ip>"; exit 1; }
+		if ping -c1 -W2 "$NODE_IP" >/dev/null 2>&1; then
+			echo "[leviathan] node $NODE_IP is up"
+			# TODO: point at your Ghost ESP build's info endpoint
+			fetch "http://$NODE_IP/api/status" 2>/dev/null || echo "[leviathan] (no /api/status — set the real endpoint in this script)"
+		else
+			echo "[leviathan] node $NODE_IP unreachable"
+			exit 1
+		fi
+		;;
+	get)
+		[ -n "$NODE_IP" ] && [ -n "$2" ] || { echo "usage: leviathan-node get <path>"; exit 1; }
+		fetch "http://$NODE_IP$2"
+		;;
+	*)
+		echo "usage: leviathan-node set <ip> | status | get <path>"
+		;;
+esac

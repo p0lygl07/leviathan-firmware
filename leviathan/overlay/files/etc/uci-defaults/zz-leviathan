@@ -32,6 +32,9 @@ if uci -q get wireless.radio0 >/dev/null; then
 
 	uci -q batch <<-EOF
 		set wireless.radio0.country='US'
+		set wireless.radio0.band='2g'
+		set wireless.radio0.channel='auto'
+		set wireless.radio0.htmode='HE20'
 		set wireless.radio0.disabled='0'
 		set wireless.default_radio0.disabled='0'
 		set wireless.default_radio0.mode='ap'
@@ -47,10 +50,21 @@ fi
 printf '%s\n%s\n' "$ROOT_PW" "$ROOT_PW" | passwd root >/dev/null 2>&1
 
 # --- branding ---------------------------------------------------
+# Argon in dark mode; the red-on-black accents come from the shipped
+# /www/luci-static/argon/css/custom.css, which argon auto-loads.
 uci -q batch <<-EOF
 	set luci.main.mediaurlbase='/luci-static/argon'
+	set luci.themes.Argon='/luci-static/argon'
 	commit luci
 EOF
+# argon-config stores its options under /etc/config/argon when present
+if [ -f /etc/config/argon ]; then
+	uci -q batch <<-EOF
+		set argon.@global[0].mode='dark'
+		set argon.@global[0].primary='#e10600'
+		commit argon
+	EOF
+fi
 
 logger -t leviathan "first-boot defaults applied (LAN ${LAN_IP})"
 exit 0

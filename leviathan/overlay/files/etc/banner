@@ -8,8 +8,11 @@
   Dual-Radio Routing + Auditing Platform  [0;90m·[0m  P01yg107 Labs
   NanoPi R28S [0;90m·[0m FriendlyWrt 25.12 [0;90m·[0m build __LEV_VER__
 [0;90m ─────────────────────────────────────────────────────────────────────[0m
-  leviathan-uplink <ssid> <key>   join an upstream network (AP stays up)
-  leviathan-uplink status         uplink + radio status
-  leviathan-mon up [chan]         AR9271 -> monitor mode (mon0)
+  [1;31muplink[0m   leviathan-uplink <ssid> <key>    join upstream (AP stays up)
+  [1;31mmonitor[0m  leviathan-mon up [chan]          AR9271 -> mon0
+  [1;31mscan[0m     leviathan-scan [secs]            survey -> CSV
+  [1;31mcapture[0m  leviathan-handshake <bssid> <ch> / leviathan-pmkid
+  [1;31mnode[0m     leviathan-node status            Ghost ESP sensor
+[0;90m ─────────────────────────────────────────────────────────────────────[0m
   [1;31mAuthorized testing only.[0m Change the root + AP passwords.
 [0;90m ─────────────────────────────────────────────────────────────────────[0m
